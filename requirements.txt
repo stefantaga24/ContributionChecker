@@ -1,2 +1,9 @@
 requests
 python-dotenv
+gitpython
+typing
+tqdm
+streamlit
+pandas
+matplotlib
+seaborn
