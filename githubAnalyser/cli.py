@@ -9,57 +9,6 @@ import pandas as pd
 from matplotlib import pyplot as plt 
 import seaborn as sns
 
-def get_file_paths(repository):
-    """Returns an array containing all the file paths of the files in the repository given by the user"""
-    files = hubAPI.get_repository_file_paths(repository)
-    paths=[]
-    for file in files:
-        if (len(paths)>300):
-            break
-        if (file['type']!='file'):
-            filesInside = hubAPI.get_repository_tree(repository,file['sha'])
-            for currentFile in filesInside['tree']:
-                if (len(paths)>10):
-                    break
-                if (currentFile['type']=='blob'):
-                    paths.append(currentFile['path'])
-        else :
-            paths.append(file['path'])
-    return paths 
-
-
-def analyze_command_REST_API(args):
-    print("Analyzing repository...")
-    date_1_april_2024 = datetime.datetime(2024, 4, 20)
-    date_29_april_2024 =  datetime.datetime(2024, 4, 29)
-    response = hubAPI.commits_in_a_given_period(args.repository,
-                                          1,date_1_april_2024.isoformat(), date_29_april_2024.isoformat())
-    commits = response["response"]
-    last_page_number = int(response["last_page"])
-    authors = [x["login"] for x in hubAPI.get_top_five_contributors(args.repository)]
-    files = get_file_paths(args.repository)
-    finalResult = {}
-    finalResult[(0,0)] = 0 
-    for filePath in files:
-        author_impacts =[]
-        for author in authors:
-            print(str(filePath) + " " + str(author))
-            fileImpact = hubAPI.get_author_file_impact(args.repository,1,filePath,
-                                                       date_1_april_2024.isoformat(), date_29_april_2024.isoformat(),
-                                                       author) 
-            author_impacts.append(fileImpact)
-        for i in range(len(authors)):
-            for j in range(i+1,len(authors)):
-                if not ((i,j) in finalResult):
-                    finalResult[(i,j)] = author_impacts[i]*author_impacts[j]
-                else :
-                    finalResult[(i,j)] = finalResult[(i,j)] + author_impacts[i]*author_impacts[j]
-    maxPair = (0,0)
-    for authorPair in finalResult:
-        if (finalResult[authorPair] > finalResult[maxPair]):
-            maxPair = authorPair
-    print(authors[maxPair[0]],authors[maxPair[1]])
-
 def update_author_pairs(author_pairs,data):
     file_authors = {} 
     for node in data["data"]["repository"]["defaultBranchRef"]["target"]["history"]["nodes"]:
@@ -81,7 +30,7 @@ def update_author_pairs(author_pairs,data):
                     author_pairs[(author1,author2)] = author_pairs[(author1,author2)] + file_authors[file][author1] + file_authors[file][author2]
 
 
-def analyze_command_graphQL_API(repository,start,end):
+def analyze_command_graphQL_API(repository,start,end,outputOption):
 
     isoFormatStart = datetime.datetime(start.year,start.month,start.day,0,0,0).isoformat()
     isoFormatEnd = datetime.datetime(end.year,end.month,end.day,0,0,0).isoformat()
@@ -115,31 +64,45 @@ def analyze_command_graphQL_API(repository,start,end):
         time.sleep(1) 
 
     if (len(author_pairs)!=0):
-        st.title("Number of common commits between developers")
+        if (outputOption == "Heatmap"):
+            st.title("Number of common commits between developers")
 
-        values = [author_pairs.get(pair) for pair in author_pairs.keys()]
+            values = [author_pairs.get(pair) for pair in author_pairs.keys()]
 
-        df = pd.DataFrame({'Developer 1': [pair[0] for pair in author_pairs.keys()],
-                        'Developer 2': [pair[1] for pair in author_pairs.keys()],
-                        'Value': values})
+            df = pd.DataFrame({'Developer 1': [pair[0] for pair in author_pairs.keys()],
+                            'Developer 2': [pair[1] for pair in author_pairs.keys()],
+                            'Value': values})
 
-        pivot_table = df.pivot_table(values='Value', index='Developer 1', columns='Developer 2', fill_value=0)
+            pivot_table = df.pivot_table(values='Value', index='Developer 1', columns='Developer 2', fill_value=0)
 
-        fig, ax = plt.subplots()
-        sns.heatmap(pivot_table, annot=True, cmap="YlGnBu", fmt='g', ax=ax)
+            fig, ax = plt.subplots()
+            sns.heatmap(pivot_table, annot=True, cmap="YlGnBu", fmt='g', ax=ax)
 
-        ax.set_title('Common commits')
-        ax.set_xlabel('Developer 2')
-        ax.set_ylabel('Developer 1')
+            ax.set_title('Common commits')
+            ax.set_xlabel('Developer 2')
+            ax.set_ylabel('Developer 1')
 
-        st.pyplot(fig)
+            st.pyplot(fig)
+        else:
+            st.title("Top 5 most collaborative developer pairs")
+            sorted_author_pairs = sorted(author_pairs.items(), key=lambda x:x[1])
+            sorted_author_pairs.reverse()
+            print(sorted_author_pairs)
+            i=0
+            for author_pair in sorted_author_pairs:
+                if (i==5):
+                    break
+                i=i+1
+                st.write("Author 1: " + str(author_pair[0][0]) + " and Author 2: "+ str(author_pair[0][1]) + " have contributed together with " + str(author_pair[1]) + " commits on common files")
+
     else :
         st.write("No developers have worked on the same files :(")
 def main():
     st.title("Github analyser for finding most collaborative pairs of developers in a repository")
     st.text(f"""
     To use the application , add the github repository in the format used below. 
-    For example, you can insert llvm/llvm-project on which this app was tested.
+    For example, you can insert electron/electron on the period 1st January to 
+    30th April 2024.
     Disclaimers :
         1. The application is evaluating 50 commits at a time such that it does not 
            get blocked by the GitHub API
@@ -159,8 +122,11 @@ def main():
         dec_31,
         format="MM.DD.YYYY",
     )
+    option = st.selectbox(
+    'How would you like the results to be shown?',
+    ('Heatmap', 'Top 5 pairs'))
     if st.button("Submit"):
-        analyze_command_graphQL_API(user_input,d[0],d[1])
+        analyze_command_graphQL_API(user_input,d[0],d[1],option)
 
 if __name__ == "__main__":
     main()
